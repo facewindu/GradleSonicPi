@@ -1,0 +1,115 @@
+import com.google.common.base.Joiner
+import com.illposed.osc.OSCMessage
+import com.illposed.osc.OSCMessageEvent
+import com.illposed.osc.messageselector.OSCPatternAddressMessageSelector
+import com.illposed.osc.transport.udp.OSCPortIn
+import com.illposed.osc.transport.udp.OSCPortOut
+
+import java.util.concurrent.Semaphore
+
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.illposed.osc:javaosc-core:0.7'
+        classpath 'com.google.guava:guava:30.0-jre'
+    }
+}
+
+class SonicPiChannel {
+
+    private static final int DEFAULT_SONIC_PI_OSC_PORT = 4560
+    private static final int DEFAULT_OSC_PORT_IN = 57110
+    private final Semaphore semaphore = new Semaphore(1, true)
+    private final OSCPortOut sonicPiSender = new OSCPortOut(new InetSocketAddress(DEFAULT_SONIC_PI_OSC_PORT))
+    private final OSCPortIn sonicPiReceiver = new OSCPortIn(DEFAULT_OSC_PORT_IN)
+    private final Gradle gradle
+    private final UUID uuid
+
+    SonicPiChannel(Gradle gradle) {
+        println "NEW SonicPiChannel, with a semaphore with ${semaphore.availablePermits()} permits"
+        this.uuid = UUID.randomUUID()
+        this.gradle = gradle
+        sonicPiReceiver.setResilient(true)
+        sonicPiReceiver.getDispatcher().setAlwaysDispatchingImmediately(true)
+        sonicPiReceiver.getDispatcher().addListener(new OSCPatternAddressMessageSelector('/ack'), this.&onAck)
+        sonicPiReceiver.startListening()
+        println 'Configured SonicPi receiver: ' + sonicPiReceiver
+        println 'Configured SonicPi sender: ' + sonicPiSender
+    }
+
+    void onAck(OSCMessageEvent ignored) {
+        semaphore.release()
+    }
+
+    void buildStarted() {
+        sendMessage('build', gradle.rootProject.name + "_" + uuid.toString(), 'started')
+    }
+
+    void taskStarted(String taskId) {
+        sendMessage('task', taskId + "_" + uuid.toString(), 'started')
+    }
+
+    void taskFinished(String taskId) {
+        sendMessage('task', taskId + "_" + uuid.toString(), 'finished')
+    }
+
+    void buildFinished() {
+        sendMessage('build', gradle.rootProject.name + "_" + uuid.toString(), 'finished')
+    }
+
+    void sendMessage(String type, String id, String action) {
+        try {
+            semaphore.acquire()
+            def address = '/event/' + Joiner.on('/').join([type, id, action])
+            sonicPiSender.send(new OSCMessage(address, []))
+        } catch (InterruptedException e) {
+            System.err.println('interrupted')
+        } catch (Throwable t) {
+            System.err.println('Could not send msg')
+            t.printStackTrace()
+        }
+    }
+
+}
+
+def sonicPi = new SonicPiChannel(gradle)
+def random = new Random()
+tasks.create('music') { Task t ->
+    doLast {
+        100.times { threadId ->
+            Thread.startDaemon {
+                sonicPi.taskStarted(t.path + "_$threadId")
+                sleep random.nextInt(2000) // randomly sleeps between 0 and 2s
+                sonicPi.taskFinished(t.path + "_$threadId")
+            }
+        }
+    }
+}
+
+gradle.taskGraph.whenReady { TaskExecutionGraph tg ->
+    println 'build started'
+    sonicPi.buildStarted()
+}
+
+gradle.taskGraph.addTaskExecutionListener(new TaskExecutionListener() {
+    @Override
+    void beforeExecute(Task task) {
+        sonicPi.taskStarted(task.path)
+    }
+
+    @Override
+    void afterExecute(Task task, TaskState taskState) {
+        sonicPi.taskFinished(task.path)
+    }
+})
+
+gradle.buildFinished { BuildResult result ->
+    println 'build finished'
+    sonicPi.buildFinished()
+}
+
+
+
+
