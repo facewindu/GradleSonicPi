@@ -1,0 +1,7 @@
+.gradle
+target
+out
+build
+.env
+.DS_Store
+.idea
