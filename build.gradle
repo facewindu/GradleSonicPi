@@ -109,7 +109,7 @@ def sonicPiBuildServiceProvider = project.gradle.sharedServices.registerIfAbsent
 } as Provider<SonicPiBuildService>
 def playTask = tasks.register('play')
 
-def nbTask = 20
+def nbTask = 150
 nbTask.times {
     def musicTask = tasks.register("music_$it", MusicTask)
     playTask.configure {

@@ -27,19 +27,17 @@
    
    define :initStarted do
      live_loop :init do
-       cue :metro
        use_synth :fm
        use_octave -2
        3.times do
          play c[0]
          sleep 1
-         cue :metro
+         cue :init
        end
        play c[2]
        sleep 0.5
        play c[1]
        sleep 0.5
-       cue :metro
        c = chords.tick
      end
    end
@@ -55,12 +53,13 @@
    define :buildStarted do |live_loop_name, args|
      loop1 = live_loop_name + "_blade"
      loop_1_kill_switch = loop_kill_switch(loop1).to_sym
+     sync :init
      live_loop loop1.to_sym do
-       sync :metro
        maybeKillLiveLoop(live_loop_name, loop_1_kill_switch)
-       use_synth :blade
-       play c, amp: 3
-       sleep 2
+       use_synth :tb303
+       r = [0.25, 0.25, 0.5, 1].choose
+       play c.choose, attack: 0, amp: 0.3, decay: 0.1
+       sleep r
      end
    end
    
@@ -75,13 +74,12 @@
    define :taskStarted do |live_loop_name, args|
      loop1 = live_loop_name + "_blade"
      loop_1_kill_switch = loop_kill_switch(loop1).to_sym
-     live_loop loop1.to_sym  do
-       sync :metro
+     sync :init
+     live_loop loop1.to_sym do
        maybeKillLiveLoop(live_loop_name, loop_1_kill_switch)
-       use_synth :tb303
-       r = [0.25, 0.25, 0.5, 1].choose
-       play c.choose, attack: 0, release: r
-       sleep r
+       use_synth :piano
+       play c, attack: 0, decay: 1
+       sleep 0.1
      end
    end
    
