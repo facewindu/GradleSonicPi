@@ -197,35 +197,28 @@
    initStarted()
    ```
 1. Run SonicPi. You should hear a background melody at 90 bpm
-1. In a terminal window, run `./gradlew music --no-daemon`
+1. In a terminal window, run `./gradlew play`
     > This should start a Gradle build. The first time it executes will be a bit longer as it will download:
     >  - The Gradle distribution
     >  - Necessary dependencies 
     >    - 'com.illposed.osc:javaosc-core:0.7' -> Java OSC library
     >    - 'com.google.guava:guava:30.0-jre' -> Google Guava
 1. You should eventually see something like
-```
-$ gw music --no-daemon
-Using gradle at '/Users/facewindu/git/GradleSonicPi/gradlew' to run buildfile '/Users/facewindu/git/GradleSonicPi/build.gradle':
-
-To honour the JVM settings for this build a new JVM will be forked. Please consider using the daemon: https://docs.gradle.org/6.3/userguide/gradle_daemon.html.
-Daemon will be stopped at the end of the build stopping after processing
-
-> Configure project :
-NEW SonicPiChannel, with a semaphore with 1 permits
-Configured SonicPi receiver: [OSCPortIn: listening on "0.0.0.0/0.0.0.0:57110"]
-Configured SonicPi sender: [OSCPortOut: sending to "0.0.0.0/0.0.0.0:4560"]
-build started
-build finished
-
-BUILD SUCCESSFUL in 21s
-1 actionable task: 1 executed
-```
-The build just executes a single `music` task, in which I 'simulate' the creation of 100 tasks
-running in parallel, each having a random duration between 0 and 2 seconds.
-
-Normally, you should observe some 'thread got too far behind time' exceptions in SonicPi.
-
-You can play with the settings in the `build.gradle` file. See the `tasks.create('music')`, to control
-the number of parallel tasks and the artificial sleep for each of them.
-
+   ```
+   $ gw play
+   Using gradle at '/Users/facewindu/git/GradleSonicPi/gradlew' to run buildfile '/Users/facewindu/git/GradleSonicPi/build.gradle':
+   
+   To honour the JVM settings for this build a new JVM will be forked. Please consider using the daemon: https://docs.gradle.org/6.3/userguide/gradle_daemon.html.
+   Daemon will be stopped at the end of the build stopping after processing
+   
+   > Task :music_0
+   NEW SonicPiChannel, with a semaphore with 1 permits
+   Configured SonicPi receiver: [OSCPortIn: listening on "0.0.0.0/0.0.0.0:57110"]
+   Configured SonicPi sender: [OSCPortOut: sending to "0.0.0.0/0.0.0.0:4560"]
+   build finished
+   
+   BUILD SUCCESSFUL in 35s
+   500 actionable tasks: 500 executed
+   ```
+   The build just executes the `play` task, which depends on 500 other tasks.
+1. If something goes wrong, execute `./gradlew --stop`

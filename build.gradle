@@ -4,6 +4,8 @@ import com.illposed.osc.OSCMessageEvent
 import com.illposed.osc.messageselector.OSCPatternAddressMessageSelector
 import com.illposed.osc.transport.udp.OSCPortIn
 import com.illposed.osc.transport.udp.OSCPortOut
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
 
 import java.util.concurrent.Semaphore
 
@@ -14,6 +16,23 @@ buildscript {
     dependencies {
         classpath 'com.illposed.osc:javaosc-core:0.7'
         classpath 'com.google.guava:guava:30.0-jre'
+        classpath 'javax.inject:javax.inject:1'
+    }
+}
+
+abstract class SonicPiBuildService implements BuildService<Parameters>, AutoCloseable {
+    final SonicPiChannel sonicPi
+    interface Parameters extends BuildServiceParameters {
+        Property<String> getProjectName()
+    }
+
+    SonicPiBuildService() {
+        sonicPi = new SonicPiChannel(parameters.projectName.get())
+    }
+
+    @Override
+    void close() {
+        sonicPi.close()
     }
 }
 
@@ -24,19 +43,20 @@ class SonicPiChannel {
     private final Semaphore semaphore = new Semaphore(1, true)
     private final OSCPortOut sonicPiSender = new OSCPortOut(new InetSocketAddress(DEFAULT_SONIC_PI_OSC_PORT))
     private final OSCPortIn sonicPiReceiver = new OSCPortIn(DEFAULT_OSC_PORT_IN)
-    private final Gradle gradle
+    private final String projectName
     private final UUID uuid
 
-    SonicPiChannel(Gradle gradle) {
+    SonicPiChannel(String projectName) {
         println "NEW SonicPiChannel, with a semaphore with ${semaphore.availablePermits()} permits"
         this.uuid = UUID.randomUUID()
-        this.gradle = gradle
+        this.projectName = projectName
         sonicPiReceiver.setResilient(true)
         sonicPiReceiver.getDispatcher().setAlwaysDispatchingImmediately(true)
         sonicPiReceiver.getDispatcher().addListener(new OSCPatternAddressMessageSelector('/ack'), this.&onAck)
         sonicPiReceiver.startListening()
         println 'Configured SonicPi receiver: ' + sonicPiReceiver
         println 'Configured SonicPi sender: ' + sonicPiSender
+        buildStarted()
     }
 
     void onAck(OSCMessageEvent ignored) {
@@ -44,19 +64,20 @@ class SonicPiChannel {
     }
 
     void buildStarted() {
-        sendMessage('build', gradle.rootProject.name + "_" + uuid.toString(), 'started')
+        sendMessage('build', projectName + "_" + uniqueId(), 'started')
     }
 
     void taskStarted(String taskId) {
-        sendMessage('task', taskId + "_" + uuid.toString(), 'started')
+        sendMessage('task', taskId + "_" + uniqueId(), 'started')
     }
 
     void taskFinished(String taskId) {
-        sendMessage('task', taskId + "_" + uuid.toString(), 'finished')
+        sendMessage('task', taskId + "_" + uniqueId(), 'finished')
     }
 
     void buildFinished() {
-        sendMessage('build', gradle.rootProject.name + "_" + uuid.toString(), 'finished')
+        sendMessage('build', projectName + "_" + uniqueId(), 'finished')
+        semaphore.drainPermits()
     }
 
     void sendMessage(String type, String id, String action) {
@@ -72,44 +93,64 @@ class SonicPiChannel {
         }
     }
 
+    String uniqueId() {
+        uuid.toString()
+    }
+
+    void close() {
+        println 'build finished'
+        buildFinished()
+    }
+
 }
 
-def sonicPi = new SonicPiChannel(gradle)
-def random = new Random()
-tasks.create('music') { Task t ->
-    doLast {
-        100.times { threadId ->
-            Thread.startDaemon {
-                sonicPi.taskStarted(t.path + "_$threadId")
-                sleep random.nextInt(2000) // randomly sleeps between 0 and 2s
-                sonicPi.taskFinished(t.path + "_$threadId")
-            }
-        }
+def sonicPiBuildServiceProvider = project.gradle.sharedServices.registerIfAbsent('sonicPi', SonicPiBuildService) {
+    it.parameters.projectName.set(gradle.rootProject.name)
+} as Provider<SonicPiBuildService>
+def playTask = tasks.register('play')
+
+def nbTask = 20
+nbTask.times {
+    def musicTask = tasks.register("music_$it", MusicTask)
+    playTask.configure {
+        it.dependsOn musicTask
     }
 }
 
-gradle.taskGraph.whenReady { TaskExecutionGraph tg ->
-    println 'build started'
-    sonicPi.buildStarted()
-}
 
 gradle.taskGraph.addTaskExecutionListener(new TaskExecutionListener() {
     @Override
     void beforeExecute(Task task) {
-        sonicPi.taskStarted(task.path)
+        sonicPiBuildServiceProvider.get().sonicPi.taskStarted(task.path)
     }
 
     @Override
     void afterExecute(Task task, TaskState taskState) {
-        sonicPi.taskFinished(task.path)
+        sonicPiBuildServiceProvider.get().sonicPi.taskFinished(task.path)
     }
 })
 
-gradle.buildFinished { BuildResult result ->
-    println 'build finished'
-    sonicPi.buildFinished()
+abstract class MusicTask extends DefaultTask {
+
+    @javax.inject.Inject
+    abstract WorkerExecutor getWorkerExecutor()
+
+    @TaskAction
+    void doStuff() {
+        workerExecutor.noIsolation().submit(MusicTaskAction) {}
+    }
 }
 
+interface MusicTaskParameters extends WorkParameters {
+}
 
+abstract class MusicTaskAction implements WorkAction<MusicTaskParameters> {
 
+    def random = new Random()
+    
+    @Override
+    void execute() {
+        sleep random.nextInt(500)
+    }
+}
 
