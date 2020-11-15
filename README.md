@@ -42,49 +42,33 @@
      end
    end
    
-   define :initFinished do |live_loop_name|
-     setKillLiveLoopSwitch(live_loop_name)
-   end
-   
    #########################################################
    # BUILD : when the Gradle builds emits an build event
    #########################################################
    
-   define :buildStarted do |live_loop_name, args|
-     loop1 = live_loop_name + "_blade"
-     loop_1_kill_switch = loop_kill_switch(loop1).to_sym
+   define :buildStarted do |thread_name, args|
      sync :init
-     live_loop loop1.to_sym do
-       maybeKillLiveLoop(live_loop_name, loop_1_kill_switch)
+     loop do
        use_synth :tb303
        r = [0.25, 0.25, 0.5, 1].choose
        play c.choose, attack: 0, amp: 0.3, decay: 0.1
        sleep r
+       maybeKillThread(thread_name)
      end
-   end
-   
-   define :buildFinished do |live_loop_name, args|
-     setKillLiveLoopSwitch(live_loop_name + "_blade")
    end
    
    #########################################################
    # TASK: : when the Gradle builds emits an task event
    #########################################################
    
-   define :taskStarted do |live_loop_name, args|
-     loop1 = live_loop_name + "_blade"
-     loop_1_kill_switch = loop_kill_switch(loop1).to_sym
+   define :taskStarted do |thread_name, args|
      sync :init
-     live_loop loop1.to_sym do
-       maybeKillLiveLoop(live_loop_name, loop_1_kill_switch)
+     loop do
        use_synth :piano
        play c, attack: 0, decay: 1
        sleep 0.1
+       maybeKillThread(thread_name)
      end
-   end
-   
-   define :taskFinished do |live_loop_name, args|
-     setKillLiveLoopSwitch(live_loop_name + "_blade")
    end
    
    #########################################################
@@ -103,12 +87,12 @@
      unique_id = input_event[3]
      action = input_event[4]
      
-     loopName = loop_name(type, unique_id)
+     threadName = thread_name(type, unique_id)
      case action
      when "started"
-       event_started(type, loopName, args)
+       event_started(type, threadName, args)
      when "finished"
-       event_finished(type, loopName, args)
+       event_finished(threadName)
      else
        puts "Unknown action: " + action
        stop
@@ -120,33 +104,23 @@
    
    
    # Creates a thread creating a live_loop which is monitoring when it should stop itself
-   define :event_started do |type, live_loop_name, args|
-     in_thread(name: (live_loop_name + "_createthread").to_sym) do
+   define :event_started do |type, thread_name, args|
+     in_thread do
        case type
        when "build"
-         buildStarted(live_loop_name, args)
+         buildStarted(thread_name, args)
        when "task"
-         taskStarted(live_loop_name, args)
+         taskStarted(thread_name, args)
        else
          puts "Unknown type: " + type
-         stop
+         kill
        end
      end
    end
    
-   # Creates a thread that is eventually going to stop a live_loop after some sleep
-   define :event_finished do |type, live_loop_name, args|
-     in_thread(name: (live_loop_name + "_killthread").to_sym) do
-       case type
-       when "build"
-         buildFinished(live_loop_name, args)
-       when "task"
-         taskFinished(live_loop_name, args)
-       else
-         puts "Unknown type: " + type
-         stop
-       end
-     end
+   # Instruct the started thread for that name to be killed
+   define :event_finished do |thread_name|
+     setKillThreadSwitch(thread_name)
    end
    
    define :parse_sync_address do |address|
@@ -164,29 +138,19 @@
    end
    
    # function to define a unique name based on the type and unique id
-   define :loop_name do |type, unique_id|
+   define :thread_name do |type, unique_id|
      return type + "_" + unique_id
    end
    
-   # function to define the unique live_loop kill switch
-   define :loop_kill_switch do |live_loop_name|
-     return live_loop_name + "_kill"
+   define :setKillThreadSwitch do |thread_name|
+     puts "set kill switch for: " + thread_name
+     set thread_name, 1
    end
    
-   # function to define the unique live_loop kill switch
-   define :loop_kill_delta do |live_loop_name|
-     return live_loop_name + "_delta"
-   end
-   
-   define :setKillLiveLoopSwitch do |live_loop_name|
-     loop_kill_switch = loop_kill_switch(live_loop_name).to_sym
-     set loop_kill_switch, 1
-   end
-   
-   define :maybeKillLiveLoop do |live_loop_name, loop_kill_switch|
-     if get(loop_kill_switch) == 1
-       set loop_kill_switch, 0
-       stop
+   define :maybeKillThread do |thread_name|
+     if get(thread_name) == 1
+       puts "killing: " + thread_name
+       Thread.kill(Thread.current)
      end
    end
    #########################################################
